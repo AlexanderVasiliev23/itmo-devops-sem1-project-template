@@ -40,4 +40,4 @@ sh ./scripts/tests.sh 1
 
 ## Контакт
 
-Телеграм: https://t.me/AlexanderV23
+Телеграм https://t.me/AlexanderV23
