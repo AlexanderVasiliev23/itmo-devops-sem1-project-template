@@ -34,6 +34,12 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if _, err := os.Stat(".env.dist"); err == nil {
+		if err := godotenv.Load(".env.dist"); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := cleanenv.ReadEnv(cfg); err != nil {
 		return nil, err
 	}
