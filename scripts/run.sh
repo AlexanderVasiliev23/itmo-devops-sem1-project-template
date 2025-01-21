@@ -11,6 +11,6 @@ fi
 go run ./cmd/. > logs.log 2>&1 &
 
 until curl -s http://localhost:8080; do
-    echo "Сервер езе не запущен, ожидаем..."
+    echo "Сервер еще не запущен, ожидаем..."
     sleep 1
 done
