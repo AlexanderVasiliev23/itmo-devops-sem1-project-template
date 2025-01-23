@@ -65,11 +65,7 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		uniqueCategories = make(map[string]struct{})
-		totalItems       int
-		totalPrice       float64
-	)
+	addedItemsCount := 0
 
 	err = e.transactionProvider.RunInTransaction(r.Context(), func(ctx context.Context) error {
 		for _, f := range zipReader.File {
@@ -131,9 +127,7 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 					CreateDate: createDate,
 				}
 
-				totalItems++
-				uniqueCategories[priceModel.Category] = struct{}{}
-				totalPrice += price
+				addedItemsCount++
 
 				if err := e.priceProvider.Insert(ctx, priceModel); err != nil {
 					return err
@@ -157,6 +151,12 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	list, err := e.priceProvider.List(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 
 	resp := struct {
@@ -164,9 +164,9 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		TotalCategories int    `json:"total_categories"`
 		TotalPrice      string `json:"total_price"`
 	}{
-		TotalItems:      totalItems,
-		TotalCategories: len(uniqueCategories),
-		TotalPrice:      fmt.Sprintf("%.2f", totalPrice),
+		TotalItems:      addedItemsCount,
+		TotalCategories: list.UniqueCategoriesCount(),
+		TotalPrice:      fmt.Sprintf("%.2f", list.TotalPrice()),
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
