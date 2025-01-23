@@ -24,9 +24,10 @@ func main() {
 	}
 	defer db.Close()
 
-	priceProvider := dataprovider.NewPriceProvider(db)
+	transactionProvider := postgres.NewTransactionProvider(db)
+	priceProvider := dataprovider.NewPriceProvider(transactionProvider)
 
-	uploadEntrypoint := upload.NewUploadEntrypoint(priceProvider)
+	uploadEntrypoint := upload.NewUploadEntrypoint(priceProvider, transactionProvider)
 	listEntrypoint := list.NewListEntrypoint(priceProvider)
 
 	r := mux.NewRouter()

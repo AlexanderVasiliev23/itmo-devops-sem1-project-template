@@ -2,28 +2,32 @@ package dataprovider
 
 import (
 	"context"
-	"database/sql"
 	"project_sem/internal/model"
+	"project_sem/internal/utils/postgres"
 )
 
 type PriceProvider struct {
-	db *sql.DB
+	transactionProvider *postgres.TransactionProvider
 }
 
-func NewPriceProvider(db *sql.DB) *PriceProvider {
+func NewPriceProvider(transactionProvider *postgres.TransactionProvider) *PriceProvider {
 	return &PriceProvider{
-		db: db,
+		transactionProvider: transactionProvider,
 	}
 }
 
 func (p *PriceProvider) Insert(ctx context.Context, price model.PriceModel) error {
+	tx, err := p.transactionProvider.GetDBTransaction(ctx)
+	if err != nil {
+		return err
+	}
+
 	insertQuery := `
-  INSERT INTO prices (id, name, category, price, create_date)
-  VALUES ($1, $2, $3, $4, $5)
+  INSERT INTO prices (name, category, price, create_date)
+  VALUES ($1, $2, $3, $4)
  `
 
-	_, err := p.db.ExecContext(ctx, insertQuery,
-		price.ID,
+	_, err = tx.ExecContext(ctx, insertQuery,
 		price.Name,
 		price.Category,
 		price.Price,
@@ -34,9 +38,14 @@ func (p *PriceProvider) Insert(ctx context.Context, price model.PriceModel) erro
 }
 
 func (p *PriceProvider) List(ctx context.Context) (model.PriceModels, error) {
+	tx, err := p.transactionProvider.GetDBTransaction(ctx)
+	if err != nil {
+		return model.PriceModels{}, err
+	}
+
 	query := "SELECT id, name, category, price, create_date FROM prices"
 
-	rows, err := p.db.QueryContext(ctx, query)
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
