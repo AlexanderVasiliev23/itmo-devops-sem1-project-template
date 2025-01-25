@@ -65,80 +65,7 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	addedItemsCount := 0
-
-	err = e.transactionProvider.RunInTransaction(r.Context(), func(ctx context.Context) error {
-		for _, f := range zipReader.File {
-			if filepath.Ext(f.Name) != ".csv" {
-				continue
-			}
-
-			rc, err := f.Open()
-			if err != nil {
-				return err
-			}
-
-			csvReader := csv.NewReader(rc)
-			for {
-				record, err := csvReader.Read()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					return err
-				}
-
-				if len(record) != 5 {
-					return &InvalidFileData{
-						Message: "Ошибка чтения CSV файла: неправильный формат, должно быть 5 колонок",
-					}
-				}
-
-				if record[0] == "id" {
-					continue
-				}
-
-				id, err := strconv.Atoi(record[0])
-				if err != nil {
-					return &InvalidFileData{
-						Message: "Ошибка чтения CSV файла: неправильный id",
-					}
-				}
-
-				price, err := strconv.ParseFloat(record[3], 64)
-				if err != nil {
-					return &InvalidFileData{
-						Message: "Ошибка чтения CSV файла: неправильный формат цены",
-					}
-				}
-
-				createDate, err := time.Parse(time.DateOnly, record[4])
-				if err != nil {
-					return &InvalidFileData{
-						Message: "Ошибка чтения CSV файла: неправильный формат даты",
-					}
-				}
-
-				priceModel := model.PriceModel{
-					ID:         id,
-					Name:       record[1],
-					Category:   record[2],
-					Price:      price,
-					CreateDate: createDate,
-				}
-
-				addedItemsCount++
-
-				if err := e.priceProvider.Insert(ctx, priceModel); err != nil {
-					return err
-				}
-			}
-
-			rc.Close()
-		}
-
-		return nil
-	})
+	priceModels, err := parseArchive(zipReader)
 	if err != nil {
 		var e *InvalidFileData
 		switch {
@@ -151,9 +78,23 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := e.priceProvider.List(r.Context())
+	var list model.PriceModels
+
+	err = e.transactionProvider.RunInTransaction(r.Context(), func(ctx context.Context) error {
+		if err := e.priceProvider.InsertBatch(ctx, priceModels); err != nil {
+			return err
+		}
+
+		list, err = e.priceProvider.List(ctx)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Неизвестная ошибка", http.StatusInternalServerError)
+		log.Println(err)
 		return
 	}
 
@@ -164,7 +105,7 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		TotalCategories int    `json:"total_categories"`
 		TotalPrice      string `json:"total_price"`
 	}{
-		TotalItems:      addedItemsCount,
+		TotalItems:      len(priceModels),
 		TotalCategories: list.UniqueCategoriesCount(),
 		TotalPrice:      fmt.Sprintf("%.2f", list.TotalPrice()),
 	}
@@ -173,4 +114,80 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ошибка маршалинга JSON", http.StatusInternalServerError)
 		return
 	}
+}
+
+func parseArchive(zipReader *zip.Reader) (model.PriceModels, error) {
+	var out model.PriceModels
+
+	for _, f := range zipReader.File {
+		if filepath.Ext(f.Name) != ".csv" {
+			continue
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+
+		csvReader := csv.NewReader(rc)
+		for {
+			record, err := csvReader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return nil, err
+			}
+			if len(record) > 0 && record[0] == "id" {
+				continue
+			}
+
+			priceModel, err := mapCsvRecordToModel(record)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, priceModel)
+		}
+
+		rc.Close()
+	}
+
+	return out, nil
+}
+
+func mapCsvRecordToModel(record []string) (*model.PriceModel, error) {
+	if len(record) != 5 {
+		return nil, &InvalidFileData{
+			Message: "Ошибка чтения CSV файла: неправильный формат, должно быть 5 колонок",
+		}
+	}
+
+	id, err := strconv.Atoi(record[0])
+	if err != nil {
+		return nil, &InvalidFileData{
+			Message: "Ошибка чтения CSV файла: неправильный id",
+		}
+	}
+
+	price, err := strconv.ParseFloat(record[3], 64)
+	if err != nil {
+		return nil, &InvalidFileData{
+			Message: "Ошибка чтения CSV файла: неправильный формат цены",
+		}
+	}
+
+	createDate, err := time.Parse(time.DateOnly, record[4])
+	if err != nil {
+		return nil, &InvalidFileData{
+			Message: "Ошибка чтения CSV файла: неправильный формат даты",
+		}
+	}
+
+	return &model.PriceModel{
+		ID:         id,
+		Name:       record[1],
+		Category:   record[2],
+		Price:      price,
+		CreateDate: createDate,
+	}, nil
 }
