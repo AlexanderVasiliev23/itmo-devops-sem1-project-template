@@ -65,7 +65,7 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	priceModels, err := parseArchive(zipReader)
+	newPriceModels, err := parseArchive(zipReader)
 	if err != nil {
 		var e *InvalidFileData
 		switch {
@@ -78,14 +78,16 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var list model.PriceModels
+	var allPriceModels model.PriceModels
 
+	// в рамках одной транзакции сначала вставляем новые записи (prices),
+	// а затем из базы получаем все модели (prices), включая новые только что вставленные
 	err = e.transactionProvider.RunInTransaction(r.Context(), func(ctx context.Context) error {
-		if err := e.priceProvider.InsertBatch(ctx, priceModels); err != nil {
+		if err := e.priceProvider.InsertBatch(ctx, newPriceModels); err != nil {
 			return err
 		}
 
-		list, err = e.priceProvider.List(ctx)
+		allPriceModels, err = e.priceProvider.List(ctx)
 		if err != nil {
 			return err
 		}
@@ -105,9 +107,9 @@ func (e *Entrypoint) Handle(w http.ResponseWriter, r *http.Request) {
 		TotalCategories int    `json:"total_categories"`
 		TotalPrice      string `json:"total_price"`
 	}{
-		TotalItems:      len(priceModels),
-		TotalCategories: list.UniqueCategoriesCount(),
-		TotalPrice:      fmt.Sprintf("%.2f", list.TotalPrice()),
+		TotalItems:      len(allPriceModels),
+		TotalCategories: allPriceModels.UniqueCategoriesCount(),
+		TotalPrice:      fmt.Sprintf("%.2f", allPriceModels.TotalPrice()),
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
